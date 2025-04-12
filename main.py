@@ -1,7 +1,6 @@
 import numpy as np
-import random
 import matplotlib.pyplot as plt
-from ldpc import criar_matriz_verificacao_ldpc
+from matriz_verificacao import criar_matriz_verificacao_ldpc
 from decodificador_ldpc import converter_H_para_AB, decodificador_bit_flipping
 
 
@@ -29,400 +28,10 @@ class CanalBSC:
             Array com a palavra possivelmente modificada
         """
         resultado = np.copy(palavra)
-        for i in range(len(resultado)):
-            if random.random() < self.p:
-                resultado[i] = 1 - resultado[i]  # Inverte o bit
-        return resultado
+        erros = np.random.random(len(resultado)) < self.p
+        resultado[erros] = 1 - resultado[erros]  # Inverte os bits com erro
+        return resultado, np.sum(erros)
 
-class CodificadorHamming:
-    """
-    Implementa um codificador de Hamming usando matriz geradora G.
-    """
-    def __init__(self, G):
-        """
-        Inicializa o codificador com a matriz geradora G.
-        
-        Args:
-            G: Matriz geradora para o código Hamming
-        """
-
-        self.G = np.array(G)
-        self.k = self.G.shape[0]  # Dimensão da palavra de entrada
-        self.n = self.G.shape[1]  # Dimensão da palavra de saída
-    
-    def codificar(self, u):
-        """
-        Codifica a palavra de informação u em palavra de código v.
-        
-        Args:
-            u: Palavra de informação (vetor de k bits)
-            
-        Returns:
-            Palavra codificada v (vetor de n bits)
-        """
-        # Multiplicação de u por G (módulo 2)
-        v = np.dot(u, self.G) % 2
-        return v
-
-class DecodificadorHamming:
-    """
-    Implementa um decodificador de Hamming usando matriz de verificação H^T.
-    """
-    def __init__(self, H_T, G):
-        """
-        Inicializa o decodificador com a matriz de verificação transposta H^T.
-        
-        Args:
-            H_T: Matriz de verificação transposta H^T
-            G: Matriz geradora (necessária para recuperar u a partir de v)
-        """
-        self.H_T = np.array(H_T)
-        self.G = np.array(G)
-        self.n = self.H_T.shape[0]  # Comprimento da palavra codificada  ###### TO DO: Verificar se é a dimensão da matriz H_T
-        
-        # Cria o mapeamento de síndrome para padrão de erro
-        self.mapa_sindromes = self._criar_mapa_sindromes()
-    
-    def _criar_mapa_sindromes(self):
-        """
-        Cria um mapeamento completo de síndromes para padrões de erro de menor peso.
-        Percorre todos os padrões de erro possíveis, do menor para o maior peso,
-        e associa cada síndrome ao primeiro (menor peso) padrão de erro que a gera.
-        
-        Returns:
-            Dicionário mapeando síndrome (como tupla) para padrão de erro
-        """
-        mapa = {}
-        
-        # Número de bits na palavra codificada
-        n = self.n
-        # Número de bits na síndrome (n-k)
-        n_k = self.H_T.shape[1]
-        
-        # Itera sobre todos os pesos possíveis (0, 1, 2, ..., n)
-        for peso in range(n + 1):
-            # Gera todos os padrões de erro com o peso atual
-            for indices_erro in self._combinacoes(range(n), peso):
-                # Cria o padrão de erro
-                e = np.zeros(n, dtype=int)
-                for i in indices_erro:
-                    e[i] = 1
-                    
-                # Calcula a síndrome para este padrão de erro
-                sindrome = tuple(np.dot(e, self.H_T) % 2)
-                
-                # Se esta síndrome ainda não foi mapeada, associa ao padrão de erro atual
-                if sindrome not in mapa:
-                    mapa[sindrome] = e
-                    
-            # Se já mapeamos todas as 2^(n-k) síndromes possíveis, podemos parar
-            if len(mapa) == 2**n_k:
-                break
-        
-        return mapa
-
-    def _combinacoes(self, elementos, k):
-        """
-        Gera todas as combinações de k elementos a partir de uma lista de elementos.
-        Usado para gerar todos os padrões de erro com um determinado peso.
-        
-        Args:
-            elementos: Lista de elementos (índices dos bits)
-            k: Número de elementos em cada combinação (peso do erro)
-        
-        Returns:
-            Lista de combinações, onde cada combinação é uma tupla de índices
-        """
-        if k == 0:
-            return [()]
-        
-        if not elementos:
-            return []
-        
-        primeiro, resto = elementos[0], elementos[1:]
-        
-        # Combinações que incluem o primeiro elemento
-        com_primeiro = [(primeiro,) + comb for comb in self._combinacoes(resto, k-1)]
-        
-        # Combinações que não incluem o primeiro elemento
-        sem_primeiro = self._combinacoes(resto, k)
-        
-        return com_primeiro + sem_primeiro
-    
-    def decodificar(self, r):
-        """
-        Decodifica a palavra recebida r.
-        
-        Args:
-            r: Palavra recebida (potencialmente com erros)
-            
-        Returns:
-            Tupla (u, v, e) onde:
-            - u é a palavra de informação decodificada
-            - v é a palavra codificada recuperada
-            - e é o padrão de erro identificado
-        """
-        # Calcula a síndrome
-        sindrome = tuple(np.dot(r, self.H_T) % 2)
-        
-        # Encontra o padrão de erro associado à síndrome
-        if sindrome in self.mapa_sindromes:
-            e = self.mapa_sindromes[sindrome]
-        else:
-            # Se a síndrome não estiver no mapa, assume erro não corrigível
-            print("Erro não corrigível: síndrome desconhecida")
-            e = np.zeros(self.n, dtype=int)
-        
-        # Recupera a palavra codificada v = r + e (XOR)
-        v = (r + e) % 2
-        
-        # Recupera a palavra de informação u (primeiros k bits de v, para códigos sistemáticos)
-        k = self.G.shape[0]
-        u = v[:k]
-        
-        return u, v, e
-
-def exemplo_hamming_74():
-    """
-    Exemplo de uso com código Hamming (7,4)
-    """
-    # Matriz geradora G para código Hamming (7,4) na forma sistemática
-    G = np.array([
-        [1, 0, 0, 0, 1, 1, 1],
-        [0, 1, 0, 0, 1, 0, 1],
-        [0, 0, 1, 0, 1, 1, 0],
-        [0, 0, 0, 1, 0, 1, 1]
-    ])
-    
-    # Matriz de verificação transposta H^T
-    H_T = np.array([
-        [1, 1, 1],
-        [1, 0, 1],
-        [1, 1, 0],
-        [0, 1, 1],
-        [1, 0, 0],
-        [0, 1, 0],
-        [0, 0, 1]
-    ])
-    
-    # Palavra de informação
-    u = np.array([1, 0, 1, 1])
-    
-    # Codificação
-    codificador = CodificadorHamming(G)
-    v = codificador.codificar(u)
-    print(f"Palavra de informação (u): {u}")
-    print(f"Palavra codificada (v): {v}")
-    
-    # Transmissão pelo canal com erro
-    p_erro = 0.1
-    canal = CanalBSC(p_erro)
-    r = canal.transmitir(v)
-    print(f"Palavra recebida (r): {r}")
-    
-    # Decodificação
-    decodificador = DecodificadorHamming(H_T, G)
-    u_recuperado, v_recuperado, erro = decodificador.decodificar(r)
-    print(f"Padrão de erro detectado (e): {erro}")
-    print(f"Palavra codificada recuperada (v): {v_recuperado}")
-    print(f"Palavra de informação recuperada (u): {u_recuperado}")
-    
-    return u, v, r, u_recuperado, v_recuperado, erro
-
-
-
-
-def exemplo_hamming_95():
-    """
-    Exemplo de uso com código Hamming (9,5)
-    """
-    # Matriz geradora G para código Hamming (9,5) na forma sistemática
-    G = np.array([
-        [1, 0, 0, 0, 0, 1, 1, 1, 1],
-        [0, 1, 0, 0, 0, 1, 1, 1, 0],
-        [0, 0, 1, 0, 0, 1, 1, 0, 1],
-        [0, 0, 0, 1, 0, 1, 0, 1, 1],
-        [0, 0, 0, 0, 1, 0, 1, 1, 1]
-    ])
-    
-    # Matriz de verificação transposta H^T
-    H_T = np.array([
-        [1, 1, 1, 1],
-        [1, 1, 1, 0],
-        [1, 1, 0, 1],
-        [1, 0, 1, 1],
-        [0, 1, 1, 1],
-        [1, 0, 0, 0],
-        [0, 1, 0, 0],
-        [0, 0, 1, 0],
-        [0, 0, 0, 1]
-    ])
-    
-    # Palavra de informação
-    u = np.array([1, 0, 1, 1, 0])
-    
-    # Codificação
-    codificador = CodificadorHamming(G)
-    v = codificador.codificar(u)
-    print(f"Palavra de informação (u): {u}")
-    print(f"Palavra codificada (v): {v}")
-    
-    # Transmissão pelo canal com erro
-    p_erro = 0.1
-    canal = CanalBSC(p_erro)
-    r = canal.transmitir(v)
-    print(f"Palavra recebida (r): {r}")
-    
-    # Decodificação
-    decodificador = DecodificadorHamming(H_T, G)
-    u_recuperado, v_recuperado, erro = decodificador.decodificar(r)
-    print(f"Padrão de erro detectado (e): {erro}")
-    print(f"Palavra codificada recuperada (v): {v_recuperado}")
-    print(f"Palavra de informação recuperada (u): {u_recuperado}")
-    
-    return u, v, r, u_recuperado, v_recuperado, erro
-
-def simular_transmissao(G, H_T, erro_canal, num_bits):
-    """
-    Função auxiliar que realiza a simulação de transmissão para um código específico.
-    """
-    k = G.shape[0]  # Tamanho do grupo de bits (informação)
-    
-    # Garantir que o número de bits seja múltiplo de k
-    num_palavras = num_bits // k
-    num_bits = num_palavras * k
-    
-    print(f"Gerando {num_bits} bits de informação aleatórios...")
-    
-    # Gerar bits de informação aleatórios
-    bits_originais = np.random.randint(0, 2, num_bits)
-    palavras_originais = bits_originais.reshape(num_palavras, k)
-    
-    # Inicializar codificador e decodificador
-    codificador = CodificadorHamming(G)
-    decodificador = DecodificadorHamming(H_T, G)
-    
-    resultados = []
-    
-    for p in erro_canal:
-        print(f"\nSimulando transmissão com probabilidade de erro p = {p}")
-        canal = CanalBSC(p)
-        bits_errados = 0
-        
-        for i in range(num_palavras):
-            u = palavras_originais[i]
-            v = codificador.codificar(u)
-            r = canal.transmitir(v)
-            u_recuperado, _, _ = decodificador.decodificar(r)
-            
-            for j in range(k):
-                if u[j] != u_recuperado[j]:
-                    bits_errados += 1
-            
-            if (i + 1) % (num_palavras // 10) == 0:
-                percentual = (i + 1) * 100 // num_palavras
-                # print(f"Progresso: {percentual}% ({i + 1}/{num_palavras} palavras processadas)")
-        
-        prob_erro = bits_errados / num_bits
-        resultados.append((p, prob_erro))
-        print(f"Probabilidade de erro para p = {p}: {prob_erro:.8f} ({bits_errados} bits errados de {num_bits})")
-    
-    return resultados
-
-def simular_sem_codigo(erro_canal, num_bits):
-    """
-    Simula transmissão sem codificação (y=x).
-    """
-    return [(p, p) for p in erro_canal]
-
-def plotar_comparacao(resultados_95, resultados_74, resultados_sem_codigo):
-    """
-    Plota os três gráficos para comparação.
-    """
-    plt.figure(figsize=(12, 8))
-    
-    # Extrair valores para cada conjunto de resultados
-    p_95, prob_95 = zip(*resultados_95)
-    p_74, prob_74 = zip(*resultados_74)
-    p_sem, prob_sem = zip(*resultados_sem_codigo)
-    
-    # Plotar os três gráficos
-    plt.loglog(p_95, prob_95, 'o-', label='Código Hamming (9,5)', color='blue')
-    plt.loglog(p_74, prob_74, 's-', label='Código Hamming (7,4)', color='red')
-    plt.loglog(p_sem, prob_sem, '--', label='Sem codificação', color='green')
-    
-    plt.gca().invert_xaxis()  # Inverte o eixo x
-    plt.grid(True, which="both", ls="-")
-    plt.xlabel('Probabilidade de erro do canal (p)')
-    plt.ylabel('Probabilidade de erro de bit')
-    plt.title('Comparação das taxas de erro de bit')
-    plt.legend()
-    plt.savefig('comparacao_codigos.png')
-    plt.show()
-
-def funcao_final():
-    """
-    Realiza simulação comparativa entre diferentes códigos de Hamming e sem codificação.
-    """
-    # Matriz G e H_T para código Hamming (9,5)
-    G_95 = np.array([
-        [1, 0, 0, 0, 0, 1, 1, 1, 1],
-        [0, 1, 0, 0, 0, 1, 1, 1, 0],
-        [0, 0, 1, 0, 0, 1, 1, 0, 1],
-        [0, 0, 0, 1, 0, 1, 0, 1, 1],
-        [0, 0, 0, 0, 1, 0, 1, 1, 1]
-    ])
-    
-    H_T_95 = np.array([
-        [1, 1, 1, 1],
-        [1, 1, 1, 0],
-        [1, 1, 0, 1],
-        [1, 0, 1, 1],
-        [0, 1, 1, 1],
-        [1, 0, 0, 0],
-        [0, 1, 0, 0],
-        [0, 0, 1, 0],
-        [0, 0, 0, 1]
-    ])
-
-    # Matriz G e H_T para código Hamming (7,4)
-    G_74 = np.array([
-        [1, 0, 0, 0, 1, 1, 1],
-        [0, 1, 0, 0, 1, 0, 1],
-        [0, 0, 1, 0, 1, 1, 0],
-        [0, 0, 0, 1, 0, 1, 1]
-    ])
-    
-    H_T_74 = np.array([
-        [1, 1, 1],
-        [1, 0, 1],
-        [1, 1, 0],
-        [0, 1, 1],
-        [1, 0, 0],
-        [0, 1, 0],
-        [0, 0, 1]
-    ])
-
-    # Probabilidades de erro do canal
-    erro_canal = [0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001, 
-                 0.0005, 0.0002, 0.0001, 0.00005, 0.00002, 0.00001, 0.000005, 0.000002]
-    
-    # Número de bits para simulação
-    num_bits = 10000000
-    
-    print("Simulando código Hamming (9,5)...")
-    resultados_95 = simular_transmissao(G_95, H_T_95, erro_canal, num_bits)
-    
-    print("\nSimulando código Hamming (7,4)...")
-    resultados_74 = simular_transmissao(G_74, H_T_74, erro_canal, num_bits)
-    
-    print("\nCalculando caso sem codificação...")
-    resultados_sem_codigo = simular_sem_codigo(erro_canal, num_bits)
-    
-    # Plotar gráfico comparativo
-    plotar_comparacao(resultados_95, resultados_74, resultados_sem_codigo)
-    
-    return resultados_95, resultados_74, resultados_sem_codigo
 
 def obter_matriz_G(H: np.ndarray) -> np.ndarray:
     """
@@ -435,6 +44,7 @@ def obter_matriz_G(H: np.ndarray) -> np.ndarray:
     Returns:
         G: Matriz geradora
     """
+    print("Calculando matriz geradora G a partir de H...")
     M, N = H.shape
     k = N - M  # dimensão da palavra de informação
     
@@ -479,55 +89,71 @@ def obter_matriz_G(H: np.ndarray) -> np.ndarray:
         # Desfaz a permutação
         G = G[:, np.argsort(perm)]
         
+        print(f"Matriz G calculada com sucesso. Dimensões: {G.shape}")
         return G
     except np.linalg.LinAlgError:
         raise ValueError("Matriz H_2 não é inversível")
 
-def simular_transmissao_ldpc(H, G, erro_canal, num_bits):
+
+def simular_transmissao_ldpc(H, G, erro_canal, num_palavras):
     """
     Simula transmissão usando código LDPC.
     """
+    print(f"Iniciando simulação LDPC com {num_palavras} palavras por probabilidade...")
+    
     k = G.shape[0]  # dimensão da palavra de informação
-    num_palavras = num_bits // k
-    num_bits = num_palavras * k
+    N = H.shape[1]  # comprimento da palavra código
     
     # Converter H para matrizes A e B para o decodificador
+    print("Convertendo matriz H para matrizes A e B...")
     A, B = converter_H_para_AB(H)
+    print(f"Matrizes A e B geradas. Dimensões A: {A.shape}, B: {B.shape}")
     
     resultados = []
     for p in erro_canal:
         print(f"\nSimulando transmissão LDPC com p = {p}")
         bits_errados = 0
+        total_erros_inseridos = 0
         
-        for _ in range(num_palavras):
-            # Gera palavra de informação aleatória
-            u = np.random.randint(0, 2, k)
+        for i in range(num_palavras):
+            # Palavra de informação com todos os bits 0
+            u = np.zeros(k, dtype=int)
             
             # Codifica
             v = np.dot(u, G) % 2
             
             # Transmite pelo canal BSC
-            r = v.copy()
-            erros = np.random.random(len(r)) < p
-            r[erros] = 1 - r[erros]
+            canal = CanalBSC(p)
+            r, erros_inseridos = canal.transmitir(v)
+            total_erros_inseridos += erros_inseridos
             
             # Decodifica
-            v_decodificado, _ = decodificador_bit_flipping(r, A, B)
+            v_decodificado, iteracoes = decodificador_bit_flipping(r, A, B)
             u_decodificado = v_decodificado[:k]  # para códigos sistemáticos
             
-            # Conta erros
-            bits_errados += np.sum(u != u_decodificado)
+            # Conta erros (como u é tudo 0, qualquer 1 em u_decodificado é erro)
+            erros_decodificacao = np.sum(u_decodificado)
+            bits_errados += erros_decodificacao
+            
+            # Log a cada 10% de progresso
+            if (i+1) % (num_palavras // 10) == 0 or (i+1) == num_palavras:
+                progresso = (i+1) * 100 // num_palavras
+                print(f"  Progresso: {progresso}% ({i+1}/{num_palavras})")
         
-        prob_erro = bits_errados / num_bits
+        prob_erro = bits_errados / (num_palavras * k)
         resultados.append((p, prob_erro))
-        print(f"Probabilidade de erro para p = {p}: {prob_erro:.8f}")
+        print(f"  Erros inseridos: {total_erros_inseridos} bits (média: {total_erros_inseridos/num_palavras:.2f} por palavra)")
+        print(f"  Erros após decodificação: {bits_errados} bits (média: {bits_errados/num_palavras:.2f} por palavra)")
+        print(f"  Probabilidade de erro para p = {p}: {prob_erro:.8f}")
     
     return resultados
+
 
 def plotar_comparacao_ldpc(resultados_100, resultados_200, resultados_500, sem_codigo):
     """
     Plota os resultados da simulação LDPC.
     """
+    print("\nGerando gráfico comparativo...")
     plt.figure(figsize=(12, 8))
     
     # Extrai valores para cada conjunto de resultados
@@ -549,50 +175,61 @@ def plotar_comparacao_ldpc(resultados_100, resultados_200, resultados_500, sem_c
     plt.title('Comparação das taxas de erro de bit - Códigos LDPC')
     plt.legend()
     plt.savefig('comparacao_ldpc.png')
+    print("Gráfico salvo como 'comparacao_ldpc.png'")
     plt.show()
+
 
 def simular_sem_codigo(erro_canal, num_bits):
     """
     Simula transmissão sem codificação (y=x).
     """
+    print("Calculando caso sem codificação...")
     return [(p, p) for p in erro_canal]
 
+
 def main():
+    print("=== Iniciando simulação de códigos LDPC ===")
+    
     # Parâmetros do código LDPC
     dv = 6  # grau dos nós variáveis
     dc = 14  # grau dos nós de verificação
+    print(f"Parâmetros: dv={dv}, dc={dc}, taxa = {1-dv/dc:.4f}")
     
     # Valores de N
     N_valores = [100, 200, 500]
     
     # Probabilidades de erro do canal
-    erro_canal = [0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001, 
-                 0.0005, 0.0002]
-    # erro_canal = [0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001, 
-    #              0.0005, 0.0002, 0.0001, 0.00005, 0.00002, 0.00001]
+    erro_canal = [0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001, 0.0005, 0.0002]
+    print(f"Probabilidades de erro: {erro_canal}")
     
-    # Número de bits para simulação
-    num_bits = 1000000
+    # Número de palavras para simulação
+    num_palavras = 1000
+    print(f"Número de palavras por probabilidade: {num_palavras}")
     
     resultados_todos = []
     
     # Simula para cada tamanho de código
     for N_alvo in N_valores:
-        print(f"\nSimulando código LDPC com N ≈ {N_alvo}")
+        print(f"\n=== Simulando código LDPC com N ≈ {N_alvo} ===")
         
         # Cria matriz H
         N = N_alvo
         while (N * dv) % dc != 0:
             N += 1
         
+        print(f"Valor de N ajustado: {N}")
+        print(f"Criando matriz de verificação LDPC {N}x{(N*dv)//dc}...")
         H = criar_matriz_verificacao_ldpc(N, dv, dc)
+        print(f"Matriz H criada. Dimensões: {H.shape}")
+        
         G = obter_matriz_G(H)
         
         # Simula transmissão
-        resultados = simular_transmissao_ldpc(H, G, erro_canal, num_bits)
+        resultados = simular_transmissao_ldpc(H, G, erro_canal, num_palavras)
         resultados_todos.append(resultados)
     
     # Simula caso sem código
+    num_bits = 1000000  # para o caso sem código
     resultados_sem_codigo = simular_sem_codigo(erro_canal, num_bits)
     
     # Plota comparação
@@ -602,6 +239,9 @@ def main():
         resultados_todos[2],  # N≈500
         resultados_sem_codigo
     )
+    
+    print("\n=== Simulação concluída ===")
+
 
 if __name__ == "__main__":
     main()

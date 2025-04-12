@@ -1,5 +1,5 @@
 import numpy as np
-from ldpc import criar_matriz_verificacao_ldpc, calcular_taxa_codigo
+from Lab2.matriz_verificacao import criar_matriz_verificacao_ldpc, calcular_taxa_codigo
 
 def encontrar_N_proximo(valor_alvo: int, dv: int, dc: int) -> int:
     """
