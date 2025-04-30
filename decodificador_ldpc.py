@@ -1,44 +1,6 @@
 import numpy as np
 from typing import Tuple, List
-
-def converter_H_para_AB(H: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Converte a matriz de verificação de paridade H para as matrizes A e B.
-    
-    Args:
-        H: Matriz de verificação de paridade (M x N)
-        
-    Returns:
-        A: Matriz N x dv onde cada linha i contém os índices dos c-nodes conectados ao v-node i
-        B: Matriz M x dc onde cada linha i contém os índices dos v-nodes conectados ao c-node i
-    """
-    M, N = H.shape
-    
-    # Encontra dv e dc a partir da matriz H
-    dv = np.sum(H[:, 0])  # número de 1s na primeira coluna
-    dc = np.sum(H[0, :])  # número de 1s na primeira linha
-    
-    # Inicializa as matrizes A e B
-    A = np.zeros((N, dv), dtype=int)
-    B = np.zeros((M, dc), dtype=int)
-    
-    # Preenche a matriz A
-    for i in range(N):
-        # Encontra os índices dos c-nodes conectados ao v-node i
-        c_nodes = np.where(H[:, i] == 1)[0]
-        if len(c_nodes) != dv:
-            raise ValueError(f"V-node {i} não tem exatamente {dv} conexões")
-        A[i, :] = c_nodes
-    
-    # Preenche a matriz B
-    for i in range(M):
-        # Encontra os índices dos v-nodes conectados ao c-node i
-        v_nodes = np.where(H[i, :] == 1)[0]
-        if len(v_nodes) != dc:
-            raise ValueError(f"C-node {i} não tem exatamente {dc} conexões")
-        B[i, :] = v_nodes
-    
-    return A, B
+from Lab2.gerar_grafo_ldpc import converter_H_para_AB
 
 def decodificador_bit_flipping(palavra_recebida: np.ndarray, 
                              A: np.ndarray, 

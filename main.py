@@ -1,7 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from matriz_verificacao import criar_matriz_verificacao_ldpc
-from decodificador_ldpc import converter_H_para_AB, decodificador_bit_flipping
+from Lab2.gerar_grafo_ldpc import criar_matriz_verificacao_ldpc, converter_H_para_AB
+from Lab2.decodificador_ldpc import decodificador_bit_flipping
+from Lab1.main import CodificadorHamming, DecodificadorHamming
 
 
 class CanalBSC:
@@ -95,13 +96,12 @@ def obter_matriz_G(H: np.ndarray) -> np.ndarray:
         raise ValueError("Matriz H_2 não é inversível")
 
 
-def simular_transmissao_ldpc(H, G, erro_canal, num_palavras_base, num_palavras_baixo_erro, limite_erro):
+def simular_transmissao_ldpc(H, erro_canal, num_palavras_base, num_palavras_baixo_erro, limite_erro):
     """
     Simula transmissão usando código LDPC.
     
     Args:
         H: Matriz de verificação de paridade
-        G: Matriz geradora
         erro_canal: Lista de probabilidades de erro do canal
         num_palavras_base: Número de palavras para probabilidades de erro >= limite_erro
         num_palavras_baixo_erro: Número de palavras para probabilidades de erro < limite_erro
@@ -109,8 +109,8 @@ def simular_transmissao_ldpc(H, G, erro_canal, num_palavras_base, num_palavras_b
     """
     print(f"Iniciando simulação LDPC com {num_palavras_base} palavras para p >= {limite_erro} e {num_palavras_baixo_erro} palavras para p < {limite_erro}...")
     
-    k = G.shape[0]  # dimensão da palavra de informação
-    N = H.shape[1]  # comprimento da palavra código
+    M, N = H.shape
+    k = N - M  # dimensão da palavra de informação
     
     # Converter H para matrizes A e B para o decodificador
     print("Convertendo matriz H para matrizes A e B...")
@@ -125,11 +125,8 @@ def simular_transmissao_ldpc(H, G, erro_canal, num_palavras_base, num_palavras_b
         total_erros_inseridos = 0
         
         for i in range(num_palavras):
-            # Palavra de informação com todos os bits 0
-            u = np.zeros(k, dtype=int)
-            
-            # Codifica
-            v = np.dot(u, G) % 2
+            # Como a palavra de informação é tudo 0, a palavra codificada também é tudo 0
+            v = np.zeros(N, dtype=int)
             
             # Transmite pelo canal BSC
             canal = CanalBSC(p)
@@ -158,11 +155,109 @@ def simular_transmissao_ldpc(H, G, erro_canal, num_palavras_base, num_palavras_b
     return resultados
 
 
-def plotar_comparacao_ldpc(resultados_100, resultados_200, resultados_500, resultados_1000, sem_codigo):
+def simular_transmissao_hamming_com_matriz_ldpc(H, erro_canal, num_palavras):
+    """
+    Simula transmissão usando código Hamming com a mesma matriz H do LDPC.
+    
+    Args:
+        H: Matriz de verificação de paridade (a mesma usada no LDPC)
+        erro_canal: Lista de probabilidades de erro do canal
+        num_palavras: Número de palavras para simulação
+    """
+    print(f"Iniciando simulação Hamming usando matriz LDPC com {num_palavras} palavras...")
+    
+    M, N = H.shape
+    k = N - M  # dimensão da palavra de informação
+    
+    # Transpor H para formato esperado pelo DecodificadorHamming
+    H_T = H.T
+    
+    # Criar uma matriz G básica para o decodificador Hamming
+    # G = [I_k | P] onde I_k é a matriz identidade k×k
+
+    G = np.zeros((k, N), dtype=int)
+    G[:, :k] = np.eye(k, dtype=int)  # Parte identidade
+    
+    # Inicializar apenas o decodificador
+    decodificador = DecodificadorHamming(H_T, G)
+    
+    resultados = []
+    for p in erro_canal:
+        print(f"\nSimulando transmissão Hamming (com matriz LDPC) com p = {p}")
+        bits_errados = 0
+        total_erros_inseridos = 0
+        
+        for i in range(num_palavras):
+            # Como a palavra de informação é tudo 0, a palavra codificada também é tudo 0
+            v = np.zeros(N, dtype=int)
+            
+            # Transmite pelo canal BSC
+            canal = CanalBSC(p)
+            r, erros_inseridos = canal.transmitir(v)
+            total_erros_inseridos += erros_inseridos
+            
+            # Calcular a síndrome
+            sindrome = np.dot(r, H_T) % 2
+            
+            # Simplificação: para palavra de tudo 0, qualquer bit 1 em u_decodificado é erro
+            if np.sum(sindrome) == 0:
+                # Sem erros detectados
+                u_decodificado = r[:k]
+            else:
+                # Com erros detectados, usa o decodificador Hamming
+                u_decodificado, _, _ = decodificador.decodificar(r)
+            
+            # Conta erros (como u é tudo 0, qualquer 1 em u_decodificado é erro)
+            erros_decodificacao = np.sum(u_decodificado)
+            bits_errados += erros_decodificacao
+            
+            # Log a cada 10% de progresso
+            if (i+1) % (num_palavras // 10) == 0 or (i+1) == num_palavras:
+                progresso = (i+1) * 100 // num_palavras
+                print(f"  Progresso: {progresso}% ({i+1}/{num_palavras})")
+        
+        prob_erro = bits_errados / (num_palavras * k)
+        resultados.append((p, prob_erro))
+        print(f"  Erros inseridos: {total_erros_inseridos} bits (média: {total_erros_inseridos/num_palavras:.2f} por palavra)")
+        print(f"  Erros após decodificação: {bits_errados} bits (média: {bits_errados/num_palavras:.2f} por palavra)")
+        print(f"  Probabilidade de erro para p = {p}: {prob_erro:.8f}")
+    
+    return resultados
+
+
+def plotar_comparacao_codigos(resultados_ldpc, resultados_hamming, sem_codigo, nome_ldpc, nome_hamming):
+    """
+    Plota os resultados da simulação para comparação entre códigos LDPC e Hamming.
+    """
+    print("\nGerando gráfico comparativo...")
+    plt.figure(figsize=(12, 8))
+    
+    # Extrai valores para cada conjunto de resultados
+    p_ldpc, prob_ldpc = zip(*resultados_ldpc)
+    p_hamming, prob_hamming = zip(*resultados_hamming)
+    p_sem, prob_sem = zip(*sem_codigo)
+    
+    # Plota os gráficos
+    plt.loglog(p_ldpc, prob_ldpc, 'o-', label=nome_ldpc, color='blue')
+    plt.loglog(p_hamming, prob_hamming, 's-', label=nome_hamming, color='red')
+    plt.loglog(p_sem, prob_sem, '--', label='Sem codificação', color='black')
+    
+    plt.gca().invert_xaxis()
+    plt.grid(True, which="both", ls="-")
+    plt.xlabel('Probabilidade de erro do canal (p)')
+    plt.ylabel('Probabilidade de erro de bit')
+    plt.title(f'Comparação das taxas de erro de bit - {nome_ldpc} vs {nome_hamming}')
+    plt.legend()
+    plt.savefig(f'comparacao_{nome_ldpc.replace(" ", "_").lower()}_{nome_hamming.replace(" ", "_").lower()}.png')
+    print(f"Gráfico salvo como 'comparacao_{nome_ldpc.replace(' ', '_').lower()}_{nome_hamming.replace(' ', '_').lower()}.png'")
+    plt.show()
+
+
+def plotar_comparacao_ldpc(resultados_100, resultados_200, resultados_500, resultados_1000, resultados_hamming, sem_codigo):
     """
     Plota os resultados da simulação LDPC.
     """
-    print("\nGerando gráfico comparativo...")
+    print("\nGerando gráfico comparativo de todos os códigos...")
     plt.figure(figsize=(12, 8))
     
     # Extrai valores para cada conjunto de resultados
@@ -170,6 +265,7 @@ def plotar_comparacao_ldpc(resultados_100, resultados_200, resultados_500, resul
     p_200, prob_200 = zip(*resultados_200)
     p_500, prob_500 = zip(*resultados_500)
     p_1000, prob_1000 = zip(*resultados_1000)
+    p_hamming, prob_hamming = zip(*resultados_hamming)
     p_sem, prob_sem = zip(*sem_codigo)
     
     # Plota os gráficos
@@ -177,16 +273,17 @@ def plotar_comparacao_ldpc(resultados_100, resultados_200, resultados_500, resul
     plt.loglog(p_200, prob_200, 's-', label='LDPC N≈200', color='red')
     plt.loglog(p_500, prob_500, '^-', label='LDPC N≈500', color='green')
     plt.loglog(p_1000, prob_1000, '*-', label='LDPC N≈1000', color='purple')
+    plt.loglog(p_hamming, prob_hamming, 'D-', label='Hamming (equivalente)', color='orange')
     plt.loglog(p_sem, prob_sem, '--', label='Sem codificação', color='black')
     
     plt.gca().invert_xaxis()
     plt.grid(True, which="both", ls="-")
     plt.xlabel('Probabilidade de erro do canal (p)')
     plt.ylabel('Probabilidade de erro de bit')
-    plt.title('Comparação das taxas de erro de bit - Códigos LDPC')
+    plt.title('Comparação das taxas de erro de bit - Códigos LDPC vs Hamming')
     plt.legend()
-    plt.savefig('comparacao_ldpc.png')
-    print("Gráfico salvo como 'comparacao_ldpc.png'")
+    plt.savefig('comparacao_todos_codigos.png')
+    print("Gráfico salvo como 'comparacao_todos_codigos.png'")
     plt.show()
 
 
@@ -199,12 +296,12 @@ def simular_sem_codigo(erro_canal, num_bits):
 
 
 def main():
-    print("=== Iniciando simulação de códigos LDPC ===")
+    print("=== Iniciando simulação de códigos LDPC e Hamming ===")
     
     # Parâmetros do código LDPC
     dv = 6  # grau dos nós variáveis
     dc = 14  # grau dos nós de verificação
-    print(f"Parâmetros: dv={dv}, dc={dc}, taxa = {1-dv/dc:.4f}")
+    print(f"Parâmetros LDPC: dv={dv}, dc={dc}, taxa = {1-dv/dc:.4f}")
     
     # Valores de N
     N_valores = [100, 200, 500, 1000]
@@ -214,11 +311,13 @@ def main():
     print(f"Probabilidades de erro: {erro_canal}")
     
     # Número de palavras para simulação
-    num_palavras_base = 1000  # para p >= limite_erro
-    num_palavras_baixo_erro = 10000  # para p < limite_erro
+    num_palavras_base = 500  # para p >= limite_erro
+    num_palavras_baixo_erro = 5000  # para p < limite_erro
+    num_palavras_hamming = 20000  # maior número para Hamming
     limite_erro = 0.04  # limite para usar mais palavras
     print(f"Número de palavras para p >= {limite_erro}: {num_palavras_base}")
     print(f"Número de palavras para p < {limite_erro}: {num_palavras_baixo_erro}")
+    print(f"Número de palavras para Hamming: {num_palavras_hamming}")
     
     resultados_todos = []
     
@@ -236,22 +335,33 @@ def main():
         H = criar_matriz_verificacao_ldpc(N, dv, dc)
         print(f"Matriz H criada. Dimensões: {H.shape}")
         
-        G = obter_matriz_G(H)
-        
-        # Simula transmissão
-        resultados = simular_transmissao_ldpc(H, G, erro_canal, num_palavras_base, num_palavras_baixo_erro, limite_erro)
+        # Simula transmissão (sem precisar de G)
+        resultados = simular_transmissao_ldpc(H, erro_canal, num_palavras_base, num_palavras_baixo_erro, limite_erro)
         resultados_todos.append(resultados)
     
+    # Cria uma matriz H menor para Hamming, mantendo a mesma taxa (1-dv/dc)
+    N_hamming = 20  # Tamanho menor, mas mantendo a mesma taxa
+    while (N_hamming * dv) % dc != 0:
+        N_hamming += 1
+    
+    print(f"\n=== Criando matriz menor para Hamming: N = {N_hamming} ===")
+    H_hamming = criar_matriz_verificacao_ldpc(N_hamming, dv, dc)
+    print(f"Matriz H para Hamming criada. Dimensões: {H_hamming.shape}")
+    
+    # Simula transmissão Hamming usando a matriz LDPC menor
+    resultados_hamming = simular_transmissao_hamming_com_matriz_ldpc(H_hamming, erro_canal, num_palavras_hamming)
+    
     # Simula caso sem código
-    num_bits = 1000000  # para o caso sem código
+    num_bits = 100000  # para o caso sem código
     resultados_sem_codigo = simular_sem_codigo(erro_canal, num_bits)
     
-    # Plota comparação
+    # Plota comparação de todos os códigos
     plotar_comparacao_ldpc(
         resultados_todos[0],  # N≈100
         resultados_todos[1],  # N≈200
         resultados_todos[2],  # N≈500
         resultados_todos[3],  # N≈1000
+        resultados_hamming,   # Hamming (N menor)
         resultados_sem_codigo
     )
     
