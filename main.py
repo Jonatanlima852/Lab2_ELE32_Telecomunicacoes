@@ -95,11 +95,19 @@ def obter_matriz_G(H: np.ndarray) -> np.ndarray:
         raise ValueError("Matriz H_2 não é inversível")
 
 
-def simular_transmissao_ldpc(H, G, erro_canal, num_palavras):
+def simular_transmissao_ldpc(H, G, erro_canal, num_palavras_base, num_palavras_baixo_erro, limite_erro):
     """
     Simula transmissão usando código LDPC.
+    
+    Args:
+        H: Matriz de verificação de paridade
+        G: Matriz geradora
+        erro_canal: Lista de probabilidades de erro do canal
+        num_palavras_base: Número de palavras para probabilidades de erro >= limite_erro
+        num_palavras_baixo_erro: Número de palavras para probabilidades de erro < limite_erro
+        limite_erro: Limite de probabilidade de erro para usar num_palavras_baixo_erro
     """
-    print(f"Iniciando simulação LDPC com {num_palavras} palavras por probabilidade...")
+    print(f"Iniciando simulação LDPC com {num_palavras_base} palavras para p >= {limite_erro} e {num_palavras_baixo_erro} palavras para p < {limite_erro}...")
     
     k = G.shape[0]  # dimensão da palavra de informação
     N = H.shape[1]  # comprimento da palavra código
@@ -111,7 +119,8 @@ def simular_transmissao_ldpc(H, G, erro_canal, num_palavras):
     
     resultados = []
     for p in erro_canal:
-        print(f"\nSimulando transmissão LDPC com p = {p}")
+        num_palavras = num_palavras_baixo_erro if p < limite_erro else num_palavras_base
+        print(f"\nSimulando transmissão LDPC com p = {p} usando {num_palavras} palavras")
         bits_errados = 0
         total_erros_inseridos = 0
         
@@ -149,7 +158,7 @@ def simular_transmissao_ldpc(H, G, erro_canal, num_palavras):
     return resultados
 
 
-def plotar_comparacao_ldpc(resultados_100, resultados_200, resultados_500, sem_codigo):
+def plotar_comparacao_ldpc(resultados_100, resultados_200, resultados_500, resultados_1000, sem_codigo):
     """
     Plota os resultados da simulação LDPC.
     """
@@ -160,12 +169,14 @@ def plotar_comparacao_ldpc(resultados_100, resultados_200, resultados_500, sem_c
     p_100, prob_100 = zip(*resultados_100)
     p_200, prob_200 = zip(*resultados_200)
     p_500, prob_500 = zip(*resultados_500)
+    p_1000, prob_1000 = zip(*resultados_1000)
     p_sem, prob_sem = zip(*sem_codigo)
     
     # Plota os gráficos
     plt.loglog(p_100, prob_100, 'o-', label='LDPC N≈100', color='blue')
     plt.loglog(p_200, prob_200, 's-', label='LDPC N≈200', color='red')
     plt.loglog(p_500, prob_500, '^-', label='LDPC N≈500', color='green')
+    plt.loglog(p_1000, prob_1000, '*-', label='LDPC N≈1000', color='purple')
     plt.loglog(p_sem, prob_sem, '--', label='Sem codificação', color='black')
     
     plt.gca().invert_xaxis()
@@ -196,15 +207,18 @@ def main():
     print(f"Parâmetros: dv={dv}, dc={dc}, taxa = {1-dv/dc:.4f}")
     
     # Valores de N
-    N_valores = [100, 200, 500]
+    N_valores = [100, 200, 500, 1000]
     
     # Probabilidades de erro do canal
-    erro_canal = [0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001, 0.0005, 0.0002]
+    erro_canal = [0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001, 0.0005, 0.0002, 0.0001, 0.00005, 0.00002, 0.00001]
     print(f"Probabilidades de erro: {erro_canal}")
     
     # Número de palavras para simulação
-    num_palavras = 1000
-    print(f"Número de palavras por probabilidade: {num_palavras}")
+    num_palavras_base = 1000  # para p >= limite_erro
+    num_palavras_baixo_erro = 10000  # para p < limite_erro
+    limite_erro = 0.04  # limite para usar mais palavras
+    print(f"Número de palavras para p >= {limite_erro}: {num_palavras_base}")
+    print(f"Número de palavras para p < {limite_erro}: {num_palavras_baixo_erro}")
     
     resultados_todos = []
     
@@ -225,7 +239,7 @@ def main():
         G = obter_matriz_G(H)
         
         # Simula transmissão
-        resultados = simular_transmissao_ldpc(H, G, erro_canal, num_palavras)
+        resultados = simular_transmissao_ldpc(H, G, erro_canal, num_palavras_base, num_palavras_baixo_erro, limite_erro)
         resultados_todos.append(resultados)
     
     # Simula caso sem código
@@ -237,6 +251,7 @@ def main():
         resultados_todos[0],  # N≈100
         resultados_todos[1],  # N≈200
         resultados_todos[2],  # N≈500
+        resultados_todos[3],  # N≈1000
         resultados_sem_codigo
     )
     
